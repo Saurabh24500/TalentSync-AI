@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TalentSync AI — Multi-Agent Talent Intelligence Platform</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1054,6 +1055,50 @@ const API_LOG_TEMPLATES = [
 ];
 
 // STATE
+const API_BASE_URL = 'http://localhost:5000';
+const API_KEY = localStorage.getItem('TALENTSYNC_API_KEY') || 'demo-key-123456789';
+const APP_CONFIG = {
+  supabase_url: '',
+  supabase_publishable_key: '',
+  openai_enabled: false,
+  loaded: false
+};
+let SUPABASE_CLIENT = null;
+
+async function initSupabase() {
+  if (!APP_CONFIG.supabase_url || !APP_CONFIG.supabase_publishable_key) {
+    console.warn('Supabase config is missing, skipping initialization.');
+    return;
+  }
+  try {
+    if (typeof window.supabase === 'undefined') {
+      throw new Error('Supabase script not loaded');
+    }
+    SUPABASE_CLIENT = window.supabase.createClient(APP_CONFIG.supabase_url, APP_CONFIG.supabase_publishable_key);
+    console.log('Supabase client initialized');
+  } catch (error) {
+    console.warn('Unable to initialize Supabase client:', error);
+  }
+}
+
+async function loadAppConfig() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/config`, {
+      headers: { 'X-API-Key': API_KEY }
+    });
+    if (!response.ok) throw new Error(`Config load failed (${response.status})`);
+    const config = await response.json();
+    APP_CONFIG.supabase_url = config.supabase_url || '';
+    APP_CONFIG.supabase_publishable_key = config.supabase_publishable_key || '';
+    APP_CONFIG.openai_enabled = !!config.openai_enabled;
+    APP_CONFIG.loaded = true;
+    console.log('App config loaded', APP_CONFIG);
+    await initSupabase();
+  } catch (error) {
+    console.warn('Unable to load app config:', error);
+  }
+}
+
 let currentSkillFilter = 'AI/ML';
 let pipelineRunning = false;
 let pipelineStep = -1;
@@ -1065,7 +1110,8 @@ let filteredCandidates = [...CANDIDATES];
 // ============================================================
 // INIT
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadAppConfig();
   setDate();
   renderCandidateList();
   renderMatchCandidates(CANDIDATES);
@@ -1243,7 +1289,7 @@ function filterSkills(cat, btn) {
 function normalizeSkill(raw) {
   if (!raw.trim()) return;
   showNotif(`Normalizing "${raw}"…`);
-  // AI normalization via Anthropic
+  // AI normalization via backend proxy
   callClaude(`You are a skill normalization system. Given this raw skill text: "${raw}", respond with ONLY JSON in this format: {"normalized": "canonical name", "category": "one of: Frontend/Backend/AI/ML/DevOps/Language/Database/Cloud", "confidence": 0.0-1.0}`)
     .then(res => {
       try {
@@ -1535,36 +1581,38 @@ function copyApiKey() {
 
 function showEndpoint(ep) {
   const examples = {
-    parse:`<div class="code-line"><span class="c-comm"># POST /api/v1/parse</span></div>
-<div class="code-line">result = client.<span class="c-fn">parse</span>(</div>
+    parse:`<div class="code-line"><span class="c-comm"># POST /api/parse-resumes</span></div>
+<div class="code-line">result = client.<span class="c-fn">parse_resumes</span>(</div>
 <div class="code-line">  file=<span class="c-str">"resume.pdf"</span>,</div>
-<div class="code-line">  normalize=<span class="c-kw">True</span>,</div>
-<div class="code-line">  extract_skills=<span class="c-kw">True</span></div>
-<div class="code-line">)</div>`,
-    match:`<div class="code-line"><span class="c-comm"># POST /api/v1/match</span></div>
-<div class="code-line">match = client.<span class="c-fn">match</span>(</div>
-<div class="code-line">  candidate_id=<span class="c-str">"cand_123"</span>,</div>
 <div class="code-line">  job_description=jd_text,</div>
-<div class="code-line">  top_k=<span class="c-num">10</span>,</div>
-<div class="code-line">  include_gaps=<span class="c-kw">True</span></div>
+<div class="code-line">  include_skills=<span class="c-kw">True</span></div>
 <div class="code-line">)</div>`,
-    skills:`<div class="code-line"><span class="c-comm"># GET /api/v1/skills</span></div>
-<div class="code-line">skills = client.<span class="c-fn">get_skills</span>(</div>
-<div class="code-line">  category=<span class="c-str">"AI/ML"</span>,</div>
-<div class="code-line">  include_aliases=<span class="c-kw">True</span></div>
+    match:`<div class="code-line"><span class="c-comm"># POST /api/ai</span></div>
+<div class="code-line">response = client.<span class="c-fn">ai</span>(</div>
+<div class="code-line">  prompt=prompt_text,</div>
+<div class="code-line">  model=<span class="c-str">"gpt-4o-mini"</span></div>
 <div class="code-line">)</div>`,
-    pipeline:`<div class="code-line"><span class="c-comm"># GET /api/v1/pipeline</span></div>
-<div class="code-line">status = client.<span class="c-fn">pipeline_status</span>(</div>
-<div class="code-line">  job_id=<span class="c-str">"job_abc"</span></div>
+    skills:`<div class="code-line"><span class="c-comm"># GET /api/categories</span></div>
+<div class="code-line">skills = client.<span class="c-fn">get_categories</span>()</div>`,
+    pipeline:`<div class="code-line"><span class="c-comm"># GET /api/skill-graph/&lt;category&gt;</span></div>
+<div class="code-line">graph = client.<span class="c-fn">get_skill_graph</span>(</div>
+<div class="code-line">  category=<span class="c-str">"AI/ML"</span></div>
 <div class="code-line">)</div>`,
-    batch:`<div class="code-line"><span class="c-comm"># POST /api/v1/batch</span></div>
-<div class="code-line">results = client.<span class="c-fn">batch_parse</span>(</div>
+    batch:`<div class="code-line"><span class="c-comm"># POST /api/parse-resumes</span></div>
+<div class="code-line">results = client.<span class="c-fn">parse_resumes</span>(</div>
 <div class="code-line">  files=[<span class="c-str">"r1.pdf"</span>,<span class="c-str">"r2.pdf"</span>],</div>
-<div class="code-line">  concurrency=<span class="c-num">5</span></div>
+<div class="code-line">  job_description=jd_text</div>
 <div class="code-line">)</div>`
   };
   document.getElementById('code-sample').innerHTML = examples[ep] || '';
-  addApiLog(ep==='skills'||ep==='pipeline'?'GET':'POST', `/api/v1/${ep}`, 200, 50+Math.floor(Math.random()*300));
+  const pathMap = {
+    parse: '/api/parse-resumes',
+    match: '/api/ai',
+    skills: '/api/categories',
+    pipeline: '/api/skill-graph/AI%2FML',
+    batch: '/api/parse-resumes'
+  };
+  addApiLog(ep==='skills'||ep==='pipeline'?'GET':'POST', pathMap[ep] || '/api/parse-resumes', 200, 50+Math.floor(Math.random()*300));
 }
 
 // ============================================================
@@ -1591,7 +1639,7 @@ async function runSemanticMatch() {
 }
 
 // ============================================================
-// AI ANALYSIS (Anthropic API)
+// AI ANALYSIS (backend AI proxy)
 // ============================================================
 async function runAIAnalysis() {
   const loading = document.getElementById('profile-loading');
@@ -1669,45 +1717,103 @@ async function handleFileUpload(file) {
     showNotif('Please upload a PDF or DOCX file');
     return;
   }
+
   const content = document.getElementById('upload-content');
   const progress = document.getElementById('upload-progress');
+  const loadingOverlay = document.getElementById('profile-loading');
+  const jobDescInput = document.getElementById('job-description');
+  const jobDesc = jobDescInput ? jobDescInput.value.trim() : '';
+
   content.style.display = 'none';
   progress.style.display = 'block';
-  showNotif(`Parsing ${file.name}…`);
+  loadingOverlay.classList.add('show');
+  showNotif(`Uploading ${file.name}...`);
 
-  await sleep(2000);
+  const formData = new FormData();
+  formData.append('resumes', file);
+  formData.append('job_description', jobDesc || `Resume match for ${file.name}`);
 
-  // Simulate parsed data
-  const names = ['Jordan Lee','Morgan Davis','Taylor Kim','Casey Wong'];
-  const titles = ['Senior Backend Engineer','ML Research Scientist','Full Stack Lead','DevOps Architect'];
-  const companies = ['Meta','Microsoft','Spotify','Amazon'];
-  const skillSets = [
-    ['Python','Django','PostgreSQL','Redis','Docker'],
-    ['PyTorch','Hugging Face','CUDA','Python','Research'],
-    ['React','Node.js','TypeScript','AWS','GraphQL'],
-    ['Terraform','Kubernetes','AWS','Ansible','Go'],
-  ];
-  const idx = Math.floor(Math.random()*4);
+  try {
+    const start = Date.now();
+    const response = await fetch(`${API_BASE_URL}/api/parse-resumes`, {
+      method: 'POST',
+      headers: { 'X-API-Key': API_KEY },
+      body: formData
+    });
+    const latency = Date.now() - start;
+    const data = await response.json();
 
-  document.getElementById('cand-name').textContent = names[idx];
-  document.getElementById('cand-title').textContent = titles[idx];
-  document.getElementById('cand-email').textContent = `${names[idx].toLowerCase().replace(' ','.')}@email.com`;
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || `Server returned ${response.status}`);
+    }
 
-  const tagsEl = document.getElementById('skills-tags');
-  tagsEl.innerHTML = '';
-  skillSets[idx].forEach(s => {
-    tagsEl.innerHTML += `<span class="tag tag-cyan" style="animation:fadeIn .3s ease">${s}</span>`;
-  });
+    const resume = data.resumes && data.resumes[0];
+    if (!resume) {
+      throw new Error('No resume returned from backend');
+    }
 
-  progress.style.display = 'none';
-  content.style.display = 'block';
-  content.innerHTML = `<div style="text-align:center"><div style="font-size:24px">✅</div><p style="font-size:12px;color:var(--green);font-weight:600;margin-top:6px">${file.name}</p><p style="font-size:11px;color:var(--muted)">Parsed successfully</p></div>`;
+    document.getElementById('cand-name').textContent = resume.name;
+    document.getElementById('cand-title').textContent = resume.role;
+    document.getElementById('cand-email').textContent = `${resume.company} · ${resume.experience_years.toFixed(1)} yrs`;
 
-  addApiLog('POST', '/parse', 200, 247);
-  showNotif(`${file.name} parsed! ${skillSets[idx].length} skills extracted.`);
+    const tagsEl = document.getElementById('skills-tags');
+    tagsEl.innerHTML = '';
+    const skillItems = Object.values(resume.skills_by_category || {}).flat();
+    const uniqueSkills = [...new Set(skillItems.map(s => s.name))].slice(0, 12);
+    uniqueSkills.forEach(skill => {
+      tagsEl.innerHTML += `<span class="tag tag-cyan" style="animation:fadeIn .3s ease">${skill}</span>`;
+    });
 
-  // Auto run AI analysis
-  setTimeout(runAIAnalysis, 500);
+    const matchPct = document.getElementById('match-pct');
+    if (matchPct) matchPct.textContent = `${resume.overall_match_percent}%`;
+    const matchRing = document.getElementById('match-ring');
+    if (matchRing) {
+      const offset = 314 - (314 * resume.overall_match_percent / 100);
+      matchRing.style.strokeDashoffset = offset;
+    }
+
+    progress.style.display = 'none';
+    content.style.display = 'block';
+    content.innerHTML = `<div style="text-align:center"><div style="font-size:24px">✅</div><p style="font-size:12px;color:var(--green);font-weight:600;margin-top:6px">${file.name}</p><p style="font-size:11px;color:var(--muted)">Matched ${resume.overall_match_percent}%</p></div>`;
+    showNotif(`Resume parsed: ${resume.name} matched ${resume.overall_match_percent}%`);
+    addApiLog('POST', '/api/parse-resumes', response.status, latency);
+    setTimeout(runAIAnalysis, 500);
+  } catch (error) {
+    progress.style.display = 'none';
+    content.style.display = 'block';
+    content.innerHTML = `<div style="text-align:center"><div style="font-size:24px">⚠️</div><p style="font-size:12px;color:var(--amber);font-weight:600;margin-top:6px">${file.name}</p><p style="font-size:11px;color:var(--muted)">Backend parse failed, using demo fallback.</p></div>`;
+    showNotif('Backend parsing failed, using demo fallback.');
+    addApiLog('POST', '/api/parse-resumes', response?.status || 500, 0);
+
+    await sleep(500);
+
+    const names = ['Jordan Lee','Morgan Davis','Taylor Kim','Casey Wong'];
+    const titles = ['Senior Backend Engineer','ML Research Scientist','Full Stack Lead','DevOps Architect'];
+    const companies = ['Meta','Microsoft','Spotify','Amazon'];
+    const skillSets = [
+      ['Python','Django','PostgreSQL','Redis','Docker'],
+      ['PyTorch','Hugging Face','CUDA','Python','Research'],
+      ['React','Node.js','TypeScript','AWS','GraphQL'],
+      ['Terraform','Kubernetes','AWS','Ansible','Go'],
+    ];
+    const idx = Math.floor(Math.random()*4);
+
+    document.getElementById('cand-name').textContent = names[idx];
+    document.getElementById('cand-title').textContent = titles[idx];
+    document.getElementById('cand-email').textContent = `${names[idx].toLowerCase().replace(' ','.')}@email.com`;
+
+    const tagsEl = document.getElementById('skills-tags');
+    tagsEl.innerHTML = '';
+    skillSets[idx].forEach(s => {
+      tagsEl.innerHTML += `<span class="tag tag-cyan" style="animation:fadeIn .3s ease">${s}</span>`;
+    });
+
+    addApiLog('POST', '/parse', 200, 247);
+    showNotif(`${file.name} parsed! ${skillSets[idx].length} skills extracted.`);
+    setTimeout(runAIAnalysis, 500);
+  } finally {
+    loadingOverlay.classList.remove('show');
+  }
 }
 
 // ============================================================
@@ -1721,7 +1827,7 @@ async function runLiveDemo() {
 }
 
 // ============================================================
-// CHAT ASSISTANT (Anthropic API)
+// CHAT ASSISTANT (backend AI proxy)
 // ============================================================
 function toggleChat() {
   chatOpen = !chatOpen;
@@ -1763,21 +1869,20 @@ async function sendChat() {
 }
 
 // ============================================================
-// ANTHROPIC API CALL
+// AI PROXY CALL
 // ============================================================
 async function callClaude(prompt) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(`${API_BASE_URL}/api/ai`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{role: 'user', content: prompt}]
-    })
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY
+    },
+    body: JSON.stringify({ prompt, model: 'gpt-4o-mini' })
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'API error');
-  return data.content[0]?.text || '';
+  if (!response.ok || !data.success) throw new Error(data.error || 'API error');
+  return data.response || '';
 }
 
 // ============================================================
