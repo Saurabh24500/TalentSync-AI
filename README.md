@@ -3,6 +3,7 @@ def clean_resume_data(raw_text):
     # Removing noise, boilerplate, and non-UTF characters
     cleaned = re.sub(r'[^\x00-\x7f]', r'', raw_text)
     return cleaned.strip()
+    kuff
 🧠 2. Vectorization & Latent SpaceWe transform human experience into a coordinate in a multi-dimensional map.Embeddings: text-embedding-004Mathematics: We calculate the Cosine Similarity between a Job Description ($JD$) and a Candidate ($C$):$$Similarity = \frac{\sum_{i=1}^{n} JD_i C_i}{\sqrt{\sum_{i=1}^{n} JD_i^2} \sqrt{\sum_{i=1}^{n} C_i^2}}$$💾 3. The "Brain" Memory (Vector DB)We use a Vector Database to allow the AI to "remember" every candidate instantly.JSON// How we store candidate "DNA"
 {
   "candidate_id": "TS-882",
